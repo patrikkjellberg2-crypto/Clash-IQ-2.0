@@ -1,1 +1,0 @@
-V34: dedicated /members and /player/:tag routes; all member clicks navigate to player cards; war planner save uses same-origin fetch with encoded tags and explicit server errors; existing design and RoyaleAPI proxy retained.
