@@ -15,6 +15,10 @@ import {
   Trophy,
   Users,
   Zap,
+  Building2,
+  FlaskConical,
+  Hammer,
+  PawPrint,
 } from 'lucide-react';
 import { useGetClashDashboard } from '@workspace/api-client-react';
 import { AppSidebar } from '@/components/app-sidebar';
@@ -134,6 +138,145 @@ function Progress({
         />
       </div>
     </div>
+  );
+}
+
+
+function progressItems(value: unknown): Dict[] {
+  return Array.isArray(value)
+    ? value.map(asDict).filter((item) => typeof item.name === 'string')
+    : [];
+}
+
+function itemProgress(items: Dict[]) {
+  const rows = items
+    .map((item) => {
+      const level = num(item.level, num(item.currentLevel));
+      const maxLevel = num(item.maxLevel, num(item.max));
+      return { name: str(item.name), level, maxLevel };
+    })
+    .filter((row) => row.level > 0 && row.maxLevel > 0);
+
+  if (!rows.length) return { current: 0, max: 0, percent: null, remaining: 0 };
+
+  const current = rows.reduce((sum, row) => sum + row.level, 0);
+  const max = rows.reduce((sum, row) => sum + row.maxLevel, 0);
+  return {
+    current,
+    max,
+    percent: max ? (current / max) * 100 : null,
+    remaining: Math.max(0, max - current),
+  };
+}
+
+function ProgressCategory({
+  icon: Icon,
+  name,
+  items,
+}: {
+  icon: any;
+  name: string;
+  items: Dict[];
+}) {
+  const progress = itemProgress(items);
+  const percent = progress.percent;
+
+  return (
+    <div className="rounded-2xl border border-white/7 bg-white/[0.025] p-4">
+      <div className="flex items-center gap-3">
+        <div className="grid size-10 place-items-center rounded-xl border border-amber-400/15 bg-amber-400/[0.06] text-amber-300">
+          <Icon className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black text-white">{name}</p>
+          <p className="text-[10px] text-slate-600">
+            {percent === null ? 'Level data unavailable' : `${progress.remaining} levels remaining`}
+          </p>
+        </div>
+        <span className="font-data text-sm font-black text-amber-300">
+          {percent === null ? '—' : `${Math.round(percent)}%`}
+        </span>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all"
+          style={{ width: `${percent === null ? 0 : Math.min(100, percent)}%` }}
+        />
+      </div>
+      {progress.max > 0 && (
+        <p className="mt-2 text-right font-data text-[10px] text-slate-600">
+          {progress.current} / {progress.max} levels
+        </p>
+      )}
+    </div>
+  );
+}
+
+function UpgradeProgress({ profile }: { profile: Dict }) {
+  const heroes = progressItems(profile.heroes);
+  const pets = progressItems(profile.pets);
+  const troops = progressItems(profile.troops);
+  const spells = progressItems(profile.spells);
+  const equipment = progressItems(profile.heroEquipment ?? profile.equipment);
+  const buildings = progressItems(profile.buildings ?? profile.buildingLevels);
+  const defenses = progressItems(profile.defenses ?? profile.defenseBuildings);
+  const traps = progressItems(profile.traps);
+  const walls = progressItems(profile.walls);
+
+  const categories = [
+    { name: 'Heroes', icon: Crown, items: heroes },
+    { name: 'Pets', icon: PawPrint, items: pets },
+    { name: 'Troops', icon: Swords, items: troops },
+    { name: 'Spells', icon: FlaskConical, items: spells },
+    { name: 'Hero Equipment', icon: Zap, items: equipment },
+    { name: 'Buildings', icon: Building2, items: buildings },
+    { name: 'Defenses', icon: Shield, items: defenses },
+    { name: 'Traps', icon: Hammer, items: traps },
+    { name: 'Walls', icon: Castle, items: walls },
+  ];
+
+  const available = categories
+    .map((category) => itemProgress(category.items))
+    .filter((progress) => progress.max > 0);
+  const totalCurrent = available.reduce((sum, progress) => sum + progress.current, 0);
+  const totalMax = available.reduce((sum, progress) => sum + progress.max, 0);
+  const totalPercent = totalMax ? Math.round((totalCurrent / totalMax) * 100) : null;
+
+  return (
+    <section className="space-y-4">
+      <div className="relative overflow-hidden rounded-3xl border border-amber-400/15 bg-gradient-to-br from-[#17130b] via-[#0e1117] to-[#090b10] p-6 shadow-2xl">
+        <div className="absolute -right-20 -top-20 size-64 rounded-full bg-amber-400/10 blur-3xl" />
+        <div className="relative">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-amber-300">
+                <Hammer className="size-4" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Upgrade Progress</span>
+              </div>
+              <h3 className="mt-2 text-2xl font-black tracking-tight">Account progression</h3>
+              <p className="mt-1 text-sm text-slate-500">Everything CLASHIQ can verify for this player.</p>
+            </div>
+            <div className="text-left sm:text-right">
+              <p className="font-data text-4xl font-black text-amber-300">{totalPercent === null ? '—' : `${totalPercent}%`}</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-600">verified progress</p>
+            </div>
+          </div>
+          <div className="mt-5 h-3 overflow-hidden rounded-full bg-black/40">
+            <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300" style={{ width: `${totalPercent ?? 0}%` }} />
+          </div>
+          <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500">
+            <span><strong className="font-data text-white">{totalCurrent || '—'}</strong> completed levels</span>
+            <span><strong className="font-data text-white">{totalMax ? totalMax - totalCurrent : '—'}</strong> remaining</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {categories.map((category) => (
+          <ProgressCategory key={category.name} {...category} />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -507,6 +650,8 @@ export default function PlayerPage() {
                 </div>
               </div>
             </section>
+
+            <UpgradeProgress profile={profile} />
 
             {/* Core stats */}
             <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

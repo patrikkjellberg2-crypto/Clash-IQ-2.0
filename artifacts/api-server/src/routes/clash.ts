@@ -958,6 +958,23 @@ router.get(
       const clanTag =
         await getActiveClanTag();
 
+      // ClashKing is used as an enrichment source for Progress. The official
+      // player endpoint is still the source of truth for the profile itself.
+      // If ClashKing exposes additional progress/building fields, preserve
+      // them without making the player page dependent on them.
+      const clashKingProgress =
+        await fetchOptionalClashKingResource(
+          `/v2/player/${encodedTag}/stats`,
+          null,
+          req.log,
+        );
+
+      const clashKingProgressData =
+        clashKingProgress.data &&
+        !Array.isArray(clashKingProgress.data)
+          ? clashKingProgress.data
+          : null;
+
       const warlog =
         await fetchOptionalResource(
           `/clans/${encodeURIComponent(
@@ -1100,6 +1117,11 @@ router.get(
 
       res.json({
         ...player,
+        ...(clashKingProgressData ?? {}),
+        progressSources: {
+          officialPlayer: true,
+          clashKing: Boolean(clashKingProgressData),
+        },
         historicalWarStats: {
           wars: wars.length,
           totalAttacks,

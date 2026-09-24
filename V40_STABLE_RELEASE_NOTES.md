@@ -24,3 +24,12 @@ Do not add new speculative features until V40 is deployed and the five core scre
 3. War Planner
 4. Capital Raids
 5. Members / Player Card
+
+
+## Upgrade Progress (Clash IQ)
+
+- Added an Upgrade Progress section to Player Profile, reached directly from Members.
+- Progress is calculated from item `level` / `maxLevel` data when available.
+- Heroes, Pets, Troops, Spells and Hero Equipment are supported from the official player payload.
+- ClashKing is queried as an enrichment source for additional progress fields without making the live profile dependent on it.
+- Buildings, Defenses, Traps and Walls are displayed automatically when the enrichment source supplies those arrays; otherwise the UI clearly shows that level data is unavailable rather than inventing values.
