@@ -1,2 +1,0 @@
-- [Clash API token restrictions](clash-api-token.md) — Hosted requests can return 403 when the developer token IP allowlist excludes the server.
-- [War planner persistence](war-planner-persistence.md) — Keep manual assignments separate from read-only live Clash war snapshots.
