@@ -1,24 +1,87 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
-import { ArrowLeft, Trophy } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Trophy, WifiOff } from 'lucide-react';
 import { AppSidebar } from '@/components/app-sidebar';
 import { ClashIQInlineBanner } from '@/components/clashiq-inline-banner';
 import {
   WARS_EVENT,
-  clearWars,
-  exportWarsJson,
-  importWarsJson,
   readWars,
-  warOutcome,
-  warTime,
+  warOutcome as localWarOutcome,
+  warTime as localWarTime,
   type ArchivedWar,
 } from '@/lib/war-archive';
 
+type Attack = {
+  attackerTag: string;
+  defenderTag: string;
+  stars: number;
+  destructionPercentage: number;
+  order: number;
+};
+
+type Member = {
+  tag: string;
+  name: string;
+  townhallLevel: number;
+  mapPosition: number;
+  attacks?: Attack[];
+};
+
+type ServerWar = {
+  id: string;
+  clanTag: string;
+  clanName: string | null;
+  opponentTag: string;
+  opponentName: string | null;
+  state: string;
+  result: string | null;
+  teamSize: number;
+  attacksPerMember: number;
+  endTime: string;
+  clanStars: number;
+  clanDestruction: number;
+  clanAttacksUsed: number;
+  opponentStars: number;
+  opponentDestruction: number;
+  members: Member[];
+  opponentMembers: Member[];
+  source: 'live' | 'warlog';
+};
+
+type PlayerStat = {
+  playerTag: string;
+  playerName: string;
+  warsCounted: number;
+  attacksPossible: number;
+  attacksUsed: number;
+  starsTotal: number;
+  threeStars: number;
+  destructionTotal: number;
+};
+
 const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(Math.max(0, 3 - n));
-const dateOf = (w: ArchivedWar) => {
-  const t = warTime(w.endTime);
+
+function warTime(value: string) {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(value || '');
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+  const t = new Date(value).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+const dateOf = (endTime: string) => {
+  const t = warTime(endTime);
   return t ? new Date(t).toLocaleDateString() : '—';
 };
+
+function outcomeOf(w: ServerWar): 'win' | 'lose' | 'tie' | 'live' {
+  if (w.result === 'win' || w.result === 'lose' || w.result === 'tie') return w.result;
+  const finished = w.state === 'warEnded';
+  if (!finished) return 'live';
+  if (w.clanStars !== w.opponentStars) return w.clanStars > w.opponentStars ? 'win' : 'lose';
+  if (w.clanDestruction !== w.opponentDestruction)
+    return w.clanDestruction > w.opponentDestruction ? 'win' : 'lose';
+  return 'tie';
+}
 
 const OUTCOME_STYLE: Record<string, string> = {
   win: 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300',
@@ -26,6 +89,48 @@ const OUTCOME_STYLE: Record<string, string> = {
   tie: 'border-slate-400/30 bg-slate-400/10 text-slate-300',
   live: 'border-sky-400/30 bg-sky-400/10 text-sky-300',
 };
+
+/** Converts a locally-saved war (old format) into the server war shape,
+ *  so the UI below can render both the same way. */
+function fromLocal(w: ArchivedWar): ServerWar {
+  return {
+    id: w.id,
+    clanTag: w.clan.tag,
+    clanName: w.clan.name,
+    opponentTag: w.opponent.tag,
+    opponentName: w.opponent.name,
+    state: w.state,
+    result: localWarOutcome(w) === 'live' ? null : localWarOutcome(w),
+    teamSize: w.teamSize,
+    attacksPerMember: w.attacksPerMember,
+    endTime: w.endTime,
+    clanStars: w.clan.stars,
+    clanDestruction: w.clan.destruction,
+    clanAttacksUsed: w.clan.attacks,
+    opponentStars: w.opponent.stars,
+    opponentDestruction: w.opponent.destruction,
+    members: w.members.map(m => ({
+      tag: m.tag,
+      name: m.name,
+      townhallLevel: m.th,
+      mapPosition: m.pos,
+      attacks: m.attacks.map(a => ({
+        attackerTag: a.attackerTag,
+        defenderTag: a.defenderTag,
+        stars: a.stars,
+        destructionPercentage: a.destruction,
+        order: a.order,
+      })),
+    })),
+    opponentMembers: w.opponentMembers.map(m => ({
+      tag: m.tag,
+      name: m.name,
+      townhallLevel: m.th,
+      mapPosition: m.pos,
+    })),
+    source: w.members.length ? 'live' : 'warlog',
+  };
+}
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -37,16 +142,18 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function WarCard({ war }: { war: ArchivedWar }) {
+function WarCard({ war }: { war: ServerWar }) {
   const [open, setOpen] = useState(false);
-  const outcome = warOutcome(war);
+  const outcome = outcomeOf(war);
+
   const oppByTag = useMemo(() => {
     const map = new Map<string, { pos: number; name: string }>();
-    for (const m of war.opponentMembers) map.set(m.tag, { pos: m.pos, name: m.name });
+    for (const m of war.opponentMembers || []) map.set(m.tag, { pos: m.mapPosition, name: m.name });
     return map;
   }, [war]);
+
   const members = useMemo(
-    () => war.members.slice().sort((a, b) => a.pos - b.pos),
+    () => (war.members || []).slice().sort((a, b) => a.mapPosition - b.mapPosition),
     [war],
   );
 
@@ -64,16 +171,18 @@ function WarCard({ war }: { war: ArchivedWar }) {
         </span>
 
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-bold">vs {war.opponent.name || 'Unknown'}</span>
+          <span className="block truncate text-sm font-bold">
+            vs {war.opponentName || 'Unknown'}
+          </span>
           <span className="block text-xs text-slate-500">
-            {dateOf(war)} · {war.teamSize || '?'} vs {war.teamSize || '?'}
+            {dateOf(war.endTime)} · {war.teamSize || '?'} vs {war.teamSize || '?'}
           </span>
         </span>
 
         <span className="text-right text-sm font-black">
-          {war.clan.stars} – {war.opponent.stars}
+          {war.clanStars} – {war.opponentStars}
           <span className="block text-[11px] font-medium text-slate-500">
-            {war.clan.destruction.toFixed(1)}% – {war.opponent.destruction.toFixed(1)}%
+            {war.clanDestruction.toFixed(1)}% – {war.opponentDestruction.toFixed(1)}%
           </span>
         </span>
       </button>
@@ -82,18 +191,20 @@ function WarCard({ war }: { war: ArchivedWar }) {
         <div className="border-t border-white/5 p-4">
           {members.length === 0 ? (
             <p className="text-sm text-slate-500">
-              Only the result was saved for this war (from the official war log).
-              Player attacks are saved for wars that were open in the app while running.
+              Only the result was saved for this war (from the official war log). Wars
+              captured live while running have full attack detail.
             </p>
           ) : (
             <div className="space-y-2">
               {members.map(m => (
                 <div key={m.tag} className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
                   <p className="text-sm font-bold">
-                    #{m.pos} {m.name}{' '}
-                    <span className="text-xs font-semibold text-slate-500">TH{m.th}</span>
+                    #{m.mapPosition} {m.name}{' '}
+                    <span className="text-xs font-semibold text-slate-500">
+                      TH{m.townhallLevel}
+                    </span>
                   </p>
-                  {m.attacks.length === 0 ? (
+                  {!m.attacks?.length ? (
                     <p className="mt-1 text-xs text-red-300">No attacks used</p>
                   ) : (
                     <div className="mt-1 space-y-0.5">
@@ -105,7 +216,7 @@ function WarCard({ war }: { war: ArchivedWar }) {
                           return (
                             <p key={i} className="text-xs text-slate-300">
                               <span className="text-amber-300">{stars(a.stars)}</span>{' '}
-                              {a.destruction}%
+                              {a.destructionPercentage}%
                               {target ? ` → #${target.pos} ${target.name}` : ''}
                             </p>
                           );
@@ -123,16 +234,39 @@ function WarCard({ war }: { war: ArchivedWar }) {
 }
 
 export default function WarArchivePage() {
-  const [wars, setWars] = useState<ArchivedWar[]>(() => readWars());
-  const [text, setText] = useState('');
-  const [message, setMessage] = useState('');
-  const [confirmClear, setConfirmClear] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [wars, setWars] = useState<ServerWar[]>([]);
+  const [players, setPlayers] = useState<PlayerStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/clash/war-archive');
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      setWars(Array.isArray(data.wars) ? data.wars : []);
+      setPlayers(Array.isArray(data.players) ? data.players : []);
+      setOffline(false);
+    } catch {
+      // Server archive unavailable: fall back to whatever this device saved
+      // locally, so the page still shows something useful.
+      setWars(readWars().map(fromLocal));
+      setPlayers([]);
+      setOffline(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const refresh = () => setWars(readWars());
-    window.addEventListener(WARS_EVENT, refresh);
-    return () => window.removeEventListener(WARS_EVENT, refresh);
+    void load();
+    const onLocalChange = () => {
+      if (offline) setWars(readWars().map(fromLocal));
+    };
+    window.addEventListener(WARS_EVENT, onLocalChange);
+    return () => window.removeEventListener(WARS_EVENT, onLocalChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const sorted = useMemo(
@@ -147,80 +281,24 @@ export default function WarArchivePage() {
     let totalStars = 0;
 
     for (const w of sorted) {
-      const o = warOutcome(w);
+      const o = outcomeOf(w);
       if (o === 'win') win++;
       else if (o === 'lose') lose++;
       else if (o === 'tie') tie++;
-      if (o !== 'live') totalStars += w.clan.stars;
+      if (o !== 'live') totalStars += w.clanStars;
     }
-
-    const players = new Map<
-      string,
-      { name: string; wars: number; possible: number; used: number; stars: number; threes: number }
-    >();
-
-    for (const w of sorted) {
-      if (warOutcome(w) === 'live') continue;
-      for (const m of w.members) {
-        const p =
-          players.get(m.tag) || { name: m.name, wars: 0, possible: 0, used: 0, stars: 0, threes: 0 };
-        p.name = m.name || p.name;
-        p.wars += 1;
-        p.possible += w.attacksPerMember || 2;
-        p.used += m.attacks.length;
-        for (const a of m.attacks) {
-          p.stars += a.stars;
-          if (a.stars === 3) p.threes += 1;
-        }
-        players.set(m.tag, p);
-      }
-    }
-
-    const board = Array.from(players.entries())
-      .map(([tag, p]) => ({ tag, ...p, avg: p.used ? p.stars / p.used : 0 }))
-      .sort((a, b) => b.avg - a.avg || b.used - a.used);
 
     const finished = win + lose + tie;
-    return { win, lose, tie, totalStars, finished, board };
+    return { win, lose, tie, totalStars, finished };
   }, [sorted]);
 
-  const copy = async () => {
-    const data = exportWarsJson();
-    try {
-      await navigator.clipboard.writeText(data);
-      setMessage('Backup copied. Paste it somewhere safe (a note or a chat with yourself).');
-    } catch {
-      setText(data);
-      setMessage('Could not copy automatically. The backup is in the box below: select all and copy it.');
-    }
-  };
-
-  const download = () => {
-    try {
-      const blob = new Blob([exportWarsJson()], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'clashiq-wars-backup.json';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      setMessage('Download started. If nothing was saved, use "Copy backup" instead.');
-    } catch {
-      setMessage('Download is not supported here. Use "Copy backup" instead.');
-    }
-  };
-
-  const doImport = (value: string) => {
-    try {
-      const count = importWarsJson(value);
-      setMessage(`Imported ${count} war${count === 1 ? '' : 's'}.`);
-      setText('');
-    } catch {
-      setMessage('Could not read that backup.');
-    }
-  };
+  const board = useMemo(
+    () =>
+      players
+        .map(p => ({ ...p, avg: p.attacksUsed ? p.starsTotal / p.attacksUsed : 0 }))
+        .sort((a, b) => b.avg - a.avg || b.attacksUsed - a.attacksUsed),
+    [players],
+  );
 
   return (
     <div className="min-h-[100dvh] bg-[#07090d] text-white">
@@ -231,26 +309,46 @@ export default function WarArchivePage() {
           <ClashIQInlineBanner />
 
           <div className="mx-auto max-w-[1400px] space-y-6 px-4 pb-16 pt-2 md:px-7">
-            <div>
-              <Link
-                href="/"
-                className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-amber-300 transition hover:text-amber-200"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Command Center
-              </Link>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-amber-300 transition hover:text-amber-200"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Command Center
+                </Link>
 
-              <h1 className="mt-2 flex items-center gap-2 text-2xl font-black tracking-tight md:text-3xl">
-                <Trophy className="h-6 w-6 text-amber-300" />
-                War Archive
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                Your clan wars, saved on this device. A war with player attacks is saved
-                when the app is opened while the war is running (open it once near the end
-                to capture the final attacks). Results of finished wars are also added from
-                the official war log.
-              </p>
+                <h1 className="mt-2 flex items-center gap-2 text-2xl font-black tracking-tight md:text-3xl">
+                  <Trophy className="h-6 w-6 text-amber-300" />
+                  War Archive
+                </h1>
+                <p className="mt-1 max-w-2xl text-sm text-slate-500">
+                  Every war is saved automatically on the server as the clan uses the
+                  app, shared by everyone. A war gets full per-player attack detail
+                  when it is captured while running; older results come from the
+                  official war log.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void load()}
+                disabled={loading}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-bold text-slate-300 hover:bg-white/10 disabled:opacity-40"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
             </div>
+
+            {offline && (
+              <div className="flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-xs font-semibold text-amber-200">
+                <WifiOff className="h-4 w-4 shrink-0" />
+                Could not reach the server archive. Showing wars saved on this device
+                only.
+              </div>
+            )}
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Stat label="Wars saved" value={String(sorted.length)} />
@@ -264,15 +362,15 @@ export default function WarArchivePage() {
                 }
               />
               <Stat label="Stars earned" value={String(summary.totalStars)} sub="finished wars" />
-              <Stat label="Players tracked" value={String(summary.board.length)} />
+              <Stat label="Players tracked" value={String(board.length)} />
             </div>
 
-            {summary.board.length > 0 && (
+            {board.length > 0 && (
               <section className="rounded-2xl border border-white/10 bg-[#11151c]/90 p-5">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">
-                  Player stats
+                  Clan-wide
                 </p>
-                <h2 className="text-lg font-black">Attack performance</h2>
+                <h2 className="text-lg font-black">Player stats</h2>
 
                 <div className="mt-3 overflow-x-auto">
                   <table className="w-full min-w-[480px] text-left text-sm">
@@ -286,17 +384,17 @@ export default function WarArchivePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {summary.board.map(p => (
-                        <tr key={p.tag} className="border-t border-white/5">
-                          <td className="py-2 pr-3 font-bold">{p.name}</td>
-                          <td className="py-2 pr-3">{p.wars}</td>
+                      {board.map(p => (
+                        <tr key={p.playerTag} className="border-t border-white/5">
+                          <td className="py-2 pr-3 font-bold">{p.playerName}</td>
+                          <td className="py-2 pr-3">{p.warsCounted}</td>
                           <td className="py-2 pr-3">
-                            <span className={p.used < p.possible ? 'text-red-300' : ''}>
-                              {p.used}/{p.possible}
+                            <span className={p.attacksUsed < p.attacksPossible ? 'text-red-300' : ''}>
+                              {p.attacksUsed}/{p.attacksPossible}
                             </span>
                           </td>
                           <td className="py-2 pr-3">{p.avg.toFixed(2)}</td>
-                          <td className="py-2">{p.threes}</td>
+                          <td className="py-2">{p.threeStars}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -307,95 +405,18 @@ export default function WarArchivePage() {
 
             <section className="space-y-3">
               <h2 className="text-lg font-black">Wars</h2>
-              {sorted.length === 0 ? (
+              {loading ? (
                 <p className="rounded-xl border border-white/5 bg-white/[0.02] p-5 text-sm text-slate-500">
-                  No wars saved yet. Open the app during a war and it will appear here.
+                  Loading…
+                </p>
+              ) : sorted.length === 0 ? (
+                <p className="rounded-xl border border-white/5 bg-white/[0.02] p-5 text-sm text-slate-500">
+                  No wars saved yet. Wars are captured automatically as the app is
+                  used.
                 </p>
               ) : (
                 sorted.map(w => <WarCard key={w.id} war={w} />)
               )}
-            </section>
-
-            <section className="rounded-2xl border border-sky-300/20 bg-[#11151c]/90 p-5">
-              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-sky-300">Backup</p>
-              <h2 className="text-lg font-black">Keep your war data safe</h2>
-              <p className="mt-1 text-xs text-slate-500">
-                The archive lives in this app on this device. If you clear the app's data or
-                reinstall it, it is gone, so make a backup now and then.
-              </p>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => void copy()}
-                  className="h-11 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground hover:brightness-110"
-                >
-                  Copy backup
-                </button>
-                <button
-                  type="button"
-                  onClick={download}
-                  className="h-11 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold hover:bg-white/10"
-                >
-                  Download file
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  className="h-11 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold hover:bg-white/10"
-                >
-                  Import file
-                </button>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".json,.txt,application/json,text/plain"
-                  className="hidden"
-                  onChange={async e => {
-                    const file = e.target.files?.[0];
-                    if (file) doImport(await file.text());
-                    if (fileRef.current) fileRef.current.value = '';
-                  }}
-                />
-              </div>
-
-              <textarea
-                value={text}
-                onChange={e => setText(e.target.value)}
-                placeholder="Paste a backup here to import it"
-                spellCheck={false}
-                className="mt-3 h-24 w-full resize-y rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-xs outline-none focus:border-amber-300/50"
-              />
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={!text.trim()}
-                  onClick={() => doImport(text)}
-                  className="h-10 rounded-xl border border-amber-300/40 bg-amber-300/10 px-4 text-sm font-bold text-amber-200 disabled:opacity-40"
-                >
-                  Import pasted backup
-                </button>
-
-                {sorted.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!confirmClear) {
-                        setConfirmClear(true);
-                        return;
-                      }
-                      clearWars();
-                      setConfirmClear(false);
-                      setMessage('Archive cleared.');
-                    }}
-                    className="h-10 rounded-xl border border-red-400/30 px-4 text-sm font-semibold text-red-300"
-                  >
-                    {confirmClear ? 'Tap again to delete everything' : 'Clear archive'}
-                  </button>
-                )}
-              </div>
-
-              {message && <p className="mt-3 text-sm text-slate-300">{message}</p>}
             </section>
           </div>
         </main>
