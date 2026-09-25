@@ -47,14 +47,57 @@ const label = (value: unknown, fallback = '—') => str(value, fallback);
 const isActiveWarState = (value: unknown) =>
   ['preparation', 'inwar', 'matchmaking'].includes(str(value).toLowerCase());
 
+// The Clash of Clans API returns timestamps such as "20260916T120000.000Z",
+// which the native Date constructor cannot parse (it needs dashes/colons).
+// Falling back to `new Date()` silently produces an Invalid Date, which is
+// why dates on this page used to show "No end time recorded" for real wars.
+function parseClashTimestamp(value: unknown): number | null {
+  const raw = str(value).trim();
+  if (!raw) return null;
+
+  const match = raw.match(
+    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(?:\.(\d+))?Z?$/,
+  );
+
+  if (match) {
+    const [, year, month, day, hour, minute, second, fraction] = match;
+    const milliseconds = fraction
+      ? Number(fraction.slice(0, 3).padEnd(3, '0'))
+      : 0;
+    const timestamp = Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      milliseconds,
+    );
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  const timestamp = new Date(raw).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
 const formatDate = (value: unknown, withTime = false) => {
-  const date = new Date(str(value));
-  if (Number.isNaN(date.getTime())) return 'No end time recorded';
+  const timestamp = parseClashTimestamp(value);
+  if (timestamp === null) return 'No end time recorded';
   return new Intl.DateTimeFormat('en-US', {
     day: 'numeric',
     month: 'short',
     ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}),
-  }).format(date);
+  }).format(new Date(timestamp));
+};
+
+const readableWarState = (value: unknown) => {
+  const state = str(value).toLowerCase();
+  if (state === 'preparation') return 'Preparation Day';
+  if (state === 'inwar') return 'War Day';
+  if (state === 'warended' || state === 'ended') return 'War Ended';
+  if (state === 'matchmaking') return 'Matchmaking';
+  if (state === 'notinwar') return 'Not In War';
+  return label(value, 'Status');
 };
 const initials = (name: string) =>
   name
@@ -388,7 +431,7 @@ export default function WarCenterPage() {
                 </button>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[.18em] text-primary">
-                    Live krig / {label(currentWar.state, 'status')}
+                    War Center / {readableWarState(currentWar.state)}
                   </p>
                   <h1 className="mt-1 font-display text-xl font-bold tracking-[-.05em] md:text-2xl">
                     War Center
@@ -409,7 +452,7 @@ export default function WarCenterPage() {
                   type="button"
                   onClick={() => void refetch()}
                   className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition hover:border-primary/50 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label="Uppdatera kriget"
+                  aria-label="Refresh the war"
                   data-testid="button-refresh-war-center"
                 >
                   <RefreshCw className="size-4" />
@@ -542,7 +585,9 @@ export default function WarCenterPage() {
                             {item.attacksRemaining} remaining
                           </p>
                           <p className="text-[10px] text-muted-foreground">
-                            target #{num(item.target?.mapPosition, num(item.member.mapPosition))}
+                            {item.target
+                              ? `target #${num(item.target.mapPosition)}`
+                              : 'no mirrored target'}
                           </p>
                         </div>
                       </div>

@@ -72,6 +72,10 @@ function normalizeWarState(value: unknown): string {
     return 'ended';
   }
 
+  if (state === 'matchmaking') {
+    return 'matchmaking';
+  }
+
   return state;
 }
 
@@ -180,6 +184,7 @@ export default function WarTimer({
 
   const isPreparation = state === 'preparation';
   const isWar = state === 'inwar';
+  const isMatchmaking = state === 'matchmaking';
 
   if (!isPreparation && !isWar) {
     return (
@@ -197,7 +202,7 @@ export default function WarTimer({
               War Timer
             </p>
             <p className="mt-1 text-sm font-bold text-white/70">
-              No active war
+              {isMatchmaking ? 'Matchmaking in progress' : 'No active war'}
             </p>
           </div>
         </div>
