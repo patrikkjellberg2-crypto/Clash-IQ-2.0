@@ -468,6 +468,65 @@ export default function VillagePage() {
                   />
                 </div>
 
+                {/* Byns Totala Framsteg & Mätare */}
+                <div className="rounded-2xl border border-[#3a3a4f] bg-[#1a1a24] p-5 shadow-xl">
+                  <h2 className="text-[#ffcc00] font-black text-base mb-4 flex items-center gap-2">
+                    🏰 Byns Totala Framsteg
+                  </h2>
+                  
+                  <div className="mb-5">
+                    <div className="flex justify-between font-bold text-sm mb-2">
+                      <span>Sammanlagd Nivå (Alla Byggnader & Hjältar)</span>
+                      <span className="text-[#f1c40f]">68%</span>
+                    </div>
+                    <div className="bg-[#2a2a3d] h-4 rounded-lg overflow-hidden border border-[#3a3a50]">
+                      <div className="bg-gradient-to-r from-[#f39c12] to-[#f1c40f] h-full rounded-lg" style={{ width: '68%' }}></div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-[#222232] p-3.5 rounded-lg border border-[#2f2f45]">
+                      <div className="flex justify-between text-xs font-medium text-[#ddddf0] mb-2">
+                        <span>🛡️ Försvar</span>
+                        <span>45 / 60 (75%)</span>
+                      </div>
+                      <div className="bg-[#15151f] h-2.5 rounded-full overflow-hidden border border-[#252535]">
+                        <div className="bg-[#3498db] h-full rounded-full" style={{ width: '75%' }}></div>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#222232] p-3.5 rounded-lg border border-[#2f2f45]">
+                      <div className="flex justify-between text-xs font-medium text-[#ddddf0] mb-2">
+                        <span>👑 Hjältar</span>
+                        <span>32 / 35 (91%)</span>
+                      </div>
+                      <div className="bg-[#15151f] h-2.5 rounded-full overflow-hidden border border-[#252535]">
+                        <div className="bg-[#9b59b6] h-full rounded-full" style={{ width: '91%' }}></div>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#222232] p-3.5 rounded-lg border border-[#2f2f45]">
+                      <div className="flex justify-between text-xs font-medium text-[#ddddf0] mb-2">
+                        <span>⚔️ Armé & Lab</span>
+                        <span>18 / 25 (72%)</span>
+                      </div>
+                      <div className="bg-[#15151f] h-2.5 rounded-full overflow-hidden border border-[#252535]">
+                        <div className="bg-[#2ecc71] h-full rounded-full" style={{ width: '72%' }}></div>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#222232] p-3.5 rounded-lg border border-[#2f2f45]">
+                      <div className="flex justify-between text-xs font-medium text-[#ddddf0] mb-2">
+                        <span>🧱 Murar</span>
+                        <span>220 / 325 (67%)</span>
+                      </div>
+                      <div className="bg-[#15151f] h-2.5 rounded-full overflow-hidden border border-[#252535]">
+                        <div className="bg-[#e67e22] h-full rounded-full" style={{ width: '67%' }}></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {view.weakest.length > 0 && (
                   <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[0.04] p-5">
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">
