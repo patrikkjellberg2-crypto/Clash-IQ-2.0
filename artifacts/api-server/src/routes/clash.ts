@@ -14,13 +14,6 @@ import {
   db,
   warPlannerAssignmentsTable,
 } from "@workspace/db";
-import {
-  getArchivedWar,
-  listArchivedWars,
-  listPlayerWarStats,
-  snapshotCurrentWar,
-  snapshotWarlog,
-} from "../lib/war-archive";
 
 const router: IRouter = Router();
 
@@ -921,53 +914,8 @@ router.get(
         dashboard,
       ),
     );
-
-    // Save this war (and the war log) to the database, without slowing
-    // down or breaking the response that was just sent.
-    void snapshotCurrentWar(clanTag, dashboard.currentWar, req.log);
-    void snapshotWarlog(clanTag, warlog, req.log);
   },
 );
-
-/* -------------------------------------------------------------------------- */
-/* War archive (server-side history)                                         */
-/* -------------------------------------------------------------------------- */
-
-router.get("/clash/war-archive", async (req, res): Promise<void> => {
-  try {
-    const clanTag = await getActiveClanTag(
-      typeof req.query.clanTag === "string" ? req.query.clanTag : undefined,
-    );
-    const limit = Number(req.query.limit);
-
-    const [wars, players] = await Promise.all([
-      listArchivedWars(clanTag, Number.isFinite(limit) ? limit : 60),
-      listPlayerWarStats(clanTag),
-    ]);
-
-    res.json({ clanTag, wars, players });
-  } catch (error) {
-    req.log.error({ err: error }, "Failed to load war archive");
-    res.status(503).json({ error: "Could not load the war archive.", code: "WAR_ARCHIVE_FAILED" });
-  }
-});
-
-router.get("/clash/war-archive/:id", async (req, res): Promise<void> => {
-  try {
-    const clanTag = await getActiveClanTag(
-      typeof req.query.clanTag === "string" ? req.query.clanTag : undefined,
-    );
-    const war = await getArchivedWar(clanTag, req.params.id);
-    if (!war) {
-      res.status(404).json({ error: "War not found.", code: "WAR_NOT_FOUND" });
-      return;
-    }
-    res.json(war);
-  } catch (error) {
-    req.log.error({ err: error }, "Failed to load archived war");
-    res.status(503).json({ error: "Could not load this war.", code: "WAR_ARCHIVE_FAILED" });
-  }
-});
 
 /* -------------------------------------------------------------------------- */
 /* Player                                                                     */

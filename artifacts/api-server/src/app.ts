@@ -5,14 +5,8 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { buildSecurity, corsOptionsDelegate, sameOriginOnly } from "./middlewares/security";
 
 const app: Express = express();
-const security = buildSecurity();
-
-// Render sits behind a proxy: needed so req.ip is the real client address.
-app.set("trust proxy", 1);
-app.disable("x-powered-by");
 
 app.use(
   pinoHttp({
@@ -33,18 +27,9 @@ app.use(
     },
   }),
 );
-app.use(cors(corsOptionsDelegate));
-app.use(express.json({ limit: "256kb" }));
+app.use(cors());
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-app.use("/api", security.api);
-
-// AI endpoints: same-site only, per-IP limits and a shared daily budget.
-app.use("/api/ai", sameOriginOnly, security.aiPerMinute, security.aiPerDay, security.aiGlobalDaily);
-
-// Write endpoints (e.g. war planner assignments).
-app.use("/api", security.writes);
-app.use("/api/clash/war-planner", sameOriginOnly);
 
 app.use("/api", router);
 
