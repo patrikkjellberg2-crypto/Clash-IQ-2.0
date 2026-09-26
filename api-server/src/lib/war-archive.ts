@@ -311,3 +311,62 @@ export async function getPlayerWarHistory(clanTag: string, playerTag: string, li
 
   return entries;
 }
+
+export type ThMatchupStat = {
+  targetTownhall: number;
+  attacks: number;
+  avgStars: number;
+  threeStarRate: number;
+};
+
+/**
+ * For a clan, looks at every archived war with member-level detail and
+ * summarizes how our attacks have historically performed against each
+ * opponent Town Hall level. Used to give the AI war planner real history
+ * instead of guessing from a single war's data.
+ */
+export async function getThMatchupStats(clanTag: string, limit = 60): Promise<ThMatchupStat[]> {
+  const tag = normalizeTag(clanTag);
+
+  const wars = await db
+    .select({ members: warArchiveTable.members, opponentMembers: warArchiveTable.opponentMembers })
+    .from(warArchiveTable)
+    .where(and(eq(warArchiveTable.clanTag, tag), eq(warArchiveTable.source, "live")))
+    .orderBy(desc(warArchiveTable.endTime))
+    .limit(limit);
+
+  const byTh = new Map<number, { attacks: number; stars: number; threeStars: number }>();
+
+  for (const war of wars) {
+    const opponentMembers = Array.isArray(war.opponentMembers) ? (war.opponentMembers as Dict[]) : [];
+    const thByTag = new Map<string, number>();
+    for (const m of opponentMembers) {
+      const memberTag = normalizeTag(str(m?.tag));
+      if (memberTag !== "#") thByTag.set(memberTag, num(m?.townhallLevel));
+    }
+
+    const members = Array.isArray(war.members) ? (war.members as Dict[]) : [];
+    for (const member of members) {
+      for (const attack of Array.isArray(member?.attacks) ? member.attacks : []) {
+        const targetTh = thByTag.get(normalizeTag(str(attack?.defenderTag)));
+        if (!targetTh) continue;
+
+        const entry = byTh.get(targetTh) || { attacks: 0, stars: 0, threeStars: 0 };
+        entry.attacks += 1;
+        entry.stars += num(attack?.stars);
+        if (num(attack?.stars) === 3) entry.threeStars += 1;
+        byTh.set(targetTh, entry);
+      }
+    }
+  }
+
+  return Array.from(byTh.entries())
+    .filter(([, v]) => v.attacks >= 3) // ignore noisy samples
+    .map(([targetTownhall, v]) => ({
+      targetTownhall,
+      attacks: v.attacks,
+      avgStars: Math.round((v.stars / v.attacks) * 100) / 100,
+      threeStarRate: Math.round((v.threeStars / v.attacks) * 1000) / 10,
+    }))
+    .sort((a, b) => a.targetTownhall - b.targetTownhall);
+}
