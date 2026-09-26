@@ -1,24 +1,46 @@
 # Clash IQ – optimization notes
 
 ## Fixed
-- **Build blocker**: `routes/index.ts` imported `./ai-coach.ts`; `pnpm build` runs `tsc` first and rejects `.ts` extensions (TS5097). Now `./ai-coach`.
-- **Corrupt icon**: `clash_iq_icon_exact.jpg` was not a valid image, so the old APK workflow's `convert` step would fail. Removed; icons are now pre-generated in `android-app/resources/res` from the logo.
-- Removed stale `v40final/` copy and stray root `war-planner.tsx`; moved old changelogs to `docs/`.
+
+- Restored the complete `artifacts/api-server/src/routes/clash.ts`; the checked-in file had been truncated to 29 lines and blocked all builds.
+- Restored player war-history access and corrected defensive-history attribution.
+- Fixed TypeScript errors in AI response parsing, War Planner recommendations and the member dialog.
+- Fixed the previous-period trend calculation in war intelligence.
+- `CLASH_CLAN_TAG` now controls the server's default clan.
 
 ## Optimized
-- Logo/banner PNG 3.4 MB -> WebP 166 KB.
-- Route-level code splitting (`React.lazy`) + vendor chunks (react, recharts, framer-motion).
-- Express: immutable cache for hashed `/assets`, no-cache for `index.html`.
-- `index.html`: real description, theme-color, `viewport-fit=cover`, no longer indexable.
+
+- Clan dashboard queries stay fresh for 30 seconds and remain cached for 10 minutes in the browser.
+- Dashboard responses use a short private HTTP cache window.
+- Historical recovery is coalesced per clan, cached for 15 minutes and uses bounded concurrency.
+- Player history selects only required database fields and clamps result size.
+- Vite proxies relative `/api` traffic to the local API server.
+- Removed the duplicate unused Inter font request; the required fonts now load directly from the document head.
+- Existing optimizations remain: route-level lazy loading, content-hashed asset caching and WebP branding assets.
+
+## Validation
+
+```bash
+pnpm run typecheck
+pnpm run build
+```
+
+Both commands pass as of 2026-09-26.
 
 ## APK
-- New `android-app/` Capacitor shell (independent of the pnpm workspace) -> CI is much faster.
-- Offline/cold-start page (`www/error.html`) with auto-retry.
-- Workflow: Actions -> "Build Clash IQ APK" -> Run workflow (or push tag `apk-v1.1.0`).
-- Output artifact: `Clash-IQ-<version>-debug` (installable debug APK).
+
+- `android-app/` is an independent Capacitor shell that loads the hosted app.
+- The cold-start error page retries automatically.
+- Run the GitHub Actions workflow **Build Clash IQ APK** or push an `apk-v*` tag.
+- Play Store distribution still requires a signed release build and AAB.
 
 ## Still recommended
-- `/clashiq-hero-barbarian.png` is referenced in `war-planner.tsx` but missing from `public/`.
-- Render Free sleeps: first open in the app can take ~30-60 s. Use a paid instance or an uptime ping on `/api/health`.
-- `/api/ai/*` and war-planner write routes are unauthenticated and CORS is open: add a shared secret or rate limit before sharing the URL widely.
-- For Play Store: signed release build + AAB.
+
+- Replace the global persisted active clan with a per-client or per-user selection.
+- Add authentication and roles for write operations and paid AI features.
+- Add unit/integration tests for war-state and statistics calculations.
+- Consolidate duplicate root source directories with the workspace code under `artifacts/`.
+- `/clashiq-hero-barbarian.png` is referenced by War Planner but missing from `public/`.
+- Render free instances may sleep; monitor `/api/healthz` or use an always-on instance.
+
+See `docs/UTVECKLINGSPLAN.md` for the prioritized product and technical roadmap.

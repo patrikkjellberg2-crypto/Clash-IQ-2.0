@@ -320,10 +320,11 @@ export async function listPlayerPerformance(clanTag: string): Promise<PlayerPerf
 
     const all = aggregate(counted);
     const recent = aggregate(counted.slice(0, 5));
-    const previous = aggregate(counted.slice(5, 10));
+    const previousWars = counted.slice(5, 10);
+    const previous = aggregate(previousWars);
     const starDelta = recent.avgStars - previous.avgStars;
     const destructionDelta = recent.avgDestruction - previous.avgDestruction;
-    const comparable = previous.length >= 2 && previous.used > 0;
+    const comparable = previousWars.length >= 2 && previous.used > 0;
     const trend = !comparable
       ? "stable"
       : starDelta >= 0.2 || destructionDelta >= 5
@@ -367,4 +368,165 @@ export async function listPlayerWarStats(clanTag: string) {
     .from(playerWarStatsTable)
     .where(eq(playerWarStatsTable.clanTag, tag))
     .orderBy(desc(sql`${playerWarStatsTable.starsTotal}::float / GREATEST(${playerWarStatsTable.attacksUsed}, 1)`));
+}
+
+export type PlayerWarHistoryEntry = {
+  warId: string;
+  opponentName: string | null;
+  endTime: string;
+  won: "win" | "lose" | "tie" | "live";
+  teamSize: number;
+  townhallLevel: number;
+  mapPosition: number;
+  attacks: { stars: number; destructionPercentage: number; defenderTag: string; order: number }[];
+  defenses: { stars: number; destructionPercentage: number; attackerTag: string }[];
+};
+
+function outcomeOf(row: { clanStars: number; opponentStars: number; clanDestruction: number; opponentDestruction: number; state: string; result: string | null }) {
+  if (row.result === "win" || row.result === "lose" || row.result === "tie") return row.result;
+  if (row.state !== "warEnded") return "live" as const;
+  if (row.clanStars !== row.opponentStars) return row.clanStars > row.opponentStars ? "win" : "lose";
+  if (row.clanDestruction !== row.opponentDestruction)
+    return row.clanDestruction > row.opponentDestruction ? "win" : "lose";
+  return "tie" as const;
+}
+
+/**
+ * Scans this clan's archived wars (member detail only, i.e. source="live")
+ * for a single player's attacks and defenses. Clans have at most a few
+ * hundred stored wars, so a full scan per request is cheap; this can move
+ * to its own indexed table later if that ever changes.
+ */
+export async function getPlayerWarHistory(clanTag: string, playerTag: string, limit = 25) {
+  const tag = normalizeTag(clanTag);
+  const player = normalizeTag(playerTag);
+  const safeLimit = Math.min(100, Math.max(1, Math.trunc(limit) || 25));
+
+  // Select only fields needed by player history. The two roster JSON columns
+  // dominate row size, so avoiding the rest matters when scanning many wars.
+  const wars = await db
+    .select({
+      id: warArchiveTable.id,
+      opponentName: warArchiveTable.opponentName,
+      endTime: warArchiveTable.endTime,
+      state: warArchiveTable.state,
+      result: warArchiveTable.result,
+      teamSize: warArchiveTable.teamSize,
+      clanStars: warArchiveTable.clanStars,
+      opponentStars: warArchiveTable.opponentStars,
+      clanDestruction: warArchiveTable.clanDestruction,
+      opponentDestruction: warArchiveTable.opponentDestruction,
+      members: warArchiveTable.members,
+      opponentMembers: warArchiveTable.opponentMembers,
+    })
+    .from(warArchiveTable)
+    .where(and(eq(warArchiveTable.clanTag, tag), eq(warArchiveTable.source, "live")))
+    .orderBy(desc(warArchiveTable.endTime))
+    .limit(300);
+
+  const entries: PlayerWarHistoryEntry[] = [];
+
+  for (const war of wars) {
+    const members = Array.isArray(war.members) ? (war.members as Dict[]) : [];
+    const mine = members.find((m) => normalizeTag(str(m?.tag)) === player);
+    if (!mine) continue;
+
+    // Defensive hits live on the opponent roster: those players' attacks
+    // point back to our member's tag.
+    const opponentMembers = Array.isArray(war.opponentMembers)
+      ? (war.opponentMembers as Dict[])
+      : [];
+    const defenses: PlayerWarHistoryEntry["defenses"] = [];
+    for (const opponent of opponentMembers) {
+      for (const attack of Array.isArray(opponent?.attacks) ? opponent.attacks : []) {
+        if (normalizeTag(str(attack?.defenderTag)) === player) {
+          defenses.push({
+            stars: num(attack?.stars),
+            destructionPercentage: num(attack?.destructionPercentage),
+            attackerTag: str(attack?.attackerTag) || str(opponent?.tag),
+          });
+        }
+      }
+    }
+
+    entries.push({
+      warId: war.id,
+      opponentName: war.opponentName,
+      endTime: war.endTime,
+      won: outcomeOf(war),
+      teamSize: war.teamSize,
+      townhallLevel: num(mine.townhallLevel ?? mine.townHallLevel),
+      mapPosition: num(mine.mapPosition),
+      attacks: (Array.isArray(mine.attacks) ? mine.attacks : []).map((attack: Dict) => ({
+        stars: num(attack?.stars),
+        destructionPercentage: num(attack?.destructionPercentage),
+        defenderTag: str(attack?.defenderTag),
+        order: num(attack?.order),
+      })),
+      defenses,
+    });
+
+    if (entries.length >= safeLimit) break;
+  }
+
+  return entries;
+}
+
+export type ThMatchupStat = {
+  targetTownhall: number;
+  attacks: number;
+  avgStars: number;
+  threeStarRate: number;
+};
+
+/**
+ * For a clan, looks at every archived war with member-level detail and
+ * summarizes how our attacks have historically performed against each
+ * opponent Town Hall level. Used to give the AI war planner real history
+ * instead of guessing from a single war's data.
+ */
+export async function getThMatchupStats(clanTag: string, limit = 60): Promise<ThMatchupStat[]> {
+  const tag = normalizeTag(clanTag);
+
+  const wars = await db
+    .select({ members: warArchiveTable.members, opponentMembers: warArchiveTable.opponentMembers })
+    .from(warArchiveTable)
+    .where(and(eq(warArchiveTable.clanTag, tag), eq(warArchiveTable.source, "live")))
+    .orderBy(desc(warArchiveTable.endTime))
+    .limit(limit);
+
+  const byTh = new Map<number, { attacks: number; stars: number; threeStars: number }>();
+
+  for (const war of wars) {
+    const opponentMembers = Array.isArray(war.opponentMembers) ? (war.opponentMembers as Dict[]) : [];
+    const thByTag = new Map<string, number>();
+    for (const m of opponentMembers) {
+      const memberTag = normalizeTag(str(m?.tag));
+      if (memberTag !== "#") thByTag.set(memberTag, num(m?.townhallLevel));
+    }
+
+    const members = Array.isArray(war.members) ? (war.members as Dict[]) : [];
+    for (const member of members) {
+      for (const attack of Array.isArray(member?.attacks) ? member.attacks : []) {
+        const targetTh = thByTag.get(normalizeTag(str(attack?.defenderTag)));
+        if (!targetTh) continue;
+
+        const entry = byTh.get(targetTh) || { attacks: 0, stars: 0, threeStars: 0 };
+        entry.attacks += 1;
+        entry.stars += num(attack?.stars);
+        if (num(attack?.stars) === 3) entry.threeStars += 1;
+        byTh.set(targetTh, entry);
+      }
+    }
+  }
+
+  return Array.from(byTh.entries())
+    .filter(([, v]) => v.attacks >= 3) // ignore noisy samples
+    .map(([targetTownhall, v]) => ({
+      targetTownhall,
+      attacks: v.attacks,
+      avgStars: Math.round((v.stars / v.attacks) * 100) / 100,
+      threeStarRate: Math.round((v.threeStars / v.attacks) * 1000) / 10,
+    }))
+    .sort((a, b) => a.targetTownhall - b.targetTownhall);
 }

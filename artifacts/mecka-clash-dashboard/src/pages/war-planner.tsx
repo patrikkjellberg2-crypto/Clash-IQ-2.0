@@ -1158,7 +1158,7 @@ function OpponentAttackHistory({
         .map((attack) => {
           const defenderTag = str(
             attack.defenderTag ??
-              attack.defender?.tag ??
+              asDict(attack.defender).tag ??
               attack.targetTag,
           ).toUpperCase();
 
@@ -2047,7 +2047,7 @@ export default function WarPlannerPage() {
                     'MEDIUM',
                   ).toUpperCase();
 
-                const confidence =
+                const confidence: AIRecommendation['confidence'] =
                   confidenceRaw ===
                     'HIGH' ||
                   confidenceRaw ===
@@ -2060,7 +2060,7 @@ export default function WarPlannerPage() {
                     value.purpose,
                   );
 
-                const purpose =
+                const purpose: AIRecommendation['purpose'] =
                   purposeRaw ===
                     '3-star attempt' ||
                   purposeRaw ===
@@ -3196,11 +3196,11 @@ ${remaining > 0 ? `⚠️ ${remaining} player${remaining === 1 ? '' : 's'} still
             </section>
 
             <footer className="mt-5 grid gap-3 md:grid-cols-3">
-              {[
+              {([
                 [Target, 'Smart Targeting', 'Use matchup data to prioritize the right base.'],
                 [Lock, 'Lock the Plan', 'Freeze assignments when your strategy is set.'],
                 [Clock3, 'Live Intelligence', 'Refresh the board as the war develops.'],
-              ].map(([Icon, title, text]) => (
+              ] as const).map(([Icon, title, text]) => (
                 <div
                   key={String(title)}
                   className="rounded-2xl border border-white/10 bg-[#06111b] p-5"
@@ -3224,10 +3224,7 @@ ${remaining > 0 ? `⚠️ ${remaining} player${remaining === 1 ? '' : 's'} still
       {selectedMember && (
         <MemberDetailsDialog
           member={selectedMember}
-          open={Boolean(selectedMember)}
-          onOpenChange={(open) => {
-            if (!open) setSelectedMember(null);
-          }}
+          onClose={() => setSelectedMember(null)}
         />
       )}
     </div>

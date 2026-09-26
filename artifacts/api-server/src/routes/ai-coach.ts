@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 
 const router: IRouter = Router();
 
-const DEFAULT_CLAN_TAG = "#2Q0Q82C9R";
+const DEFAULT_CLAN_TAG = process.env.CLASH_CLAN_TAG?.trim() || "#2Q0Q82C9R";
 const CLASH_API_BASE_URL = process.env.CLASH_API_BASE_URL || "https://cocproxy.royaleapi.dev/v1";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
@@ -238,7 +238,7 @@ async function callGeminiModel(model: string, prompt: string) {
     }),
   });
 
-  const data = await response.json();
+  const data = (await response.json()) as Dict;
   if (!response.ok) {
     const err: any = new Error(`Gemini ${model} HTTP ${response.status}: ${String(data?.error?.message || data?.error?.status || "Gemini API error")}`);
     err.httpStatus = response.status;

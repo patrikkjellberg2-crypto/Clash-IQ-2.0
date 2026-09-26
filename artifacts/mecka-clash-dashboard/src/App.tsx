@@ -30,8 +30,23 @@ import {
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      // Clan data is shared by almost every page. Keep it fresh briefly so
+      // navigation does not repeat the same multi-source API request, while
+      // explicit refresh buttons can still bypass the window.
+      staleTime: 30_000,
+      gcTime: 10 * 60_000,
       refetchOnWindowFocus: false,
-      retry: 1,
+      refetchOnReconnect: true,
+      retry(failureCount, error) {
+        const status =
+          error && typeof error === 'object' && 'status' in error
+            ? Number(error.status)
+            : 0;
+
+        // Retrying validation/auth errors wastes time and upstream quota.
+        if (status >= 400 && status < 500 && status !== 429) return false;
+        return failureCount < 1;
+      },
     },
   },
 });

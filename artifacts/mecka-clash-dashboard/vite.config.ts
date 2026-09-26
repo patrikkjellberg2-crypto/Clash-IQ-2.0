@@ -67,6 +67,14 @@ export default defineConfig({
     strictPort: true,
     host: '0.0.0.0',
     allowedHosts: true,
+    // Browser code keeps using relative /api URLs. Vite forwards them to the
+    // local API process, which also makes remote preview hosts work correctly.
+    proxy: {
+      '/api': {
+        target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+    },
     fs: {
       strict: true,
     },
