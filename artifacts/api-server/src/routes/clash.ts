@@ -16,6 +16,7 @@ import {
 } from "@workspace/db";
 import {
   getArchivedWar,
+  getPlayerWarHistory,
   listArchivedWars,
   listPlayerWarStats,
   listPlayerPerformance,
@@ -23,7 +24,85 @@ import {
   snapshotWarlog,
 } from "../lib/war-archive";
 
-const router: IRouter = Router();
+
+
+/**
+ * Recover completed wars with member-level attack data before Player Cards
+ * read history. ClashKing exposes both a bulk previous-war endpoint and an
+ * end-time-specific endpoint; the official warlog is used only to discover
+ * additional completed war timestamps.
+ */
+async function recoverHistoricalWars(
+  clanTag: string,
+  log: { warn: (obj: object, message: string) => void },
+  maxWars = 15,
+): Promise<void> {
+  const requested = normalizeClanTag(clanTag);
+  const seen = new Set<string>();
+
+  const save = async (raw: ClashRecord) => {
+    const clan = raw.clan && typeof raw.clan === "object" ? raw.clan as ClashRecord : null;
+    const opponent = raw.opponent && typeof raw.opponent === "object" ? raw.opponent as ClashRecord : null;
+    if (!clan || !opponent) return;
+    const clanTagFromPayload = normalizeClanTag(String(clan.tag ?? ""));
+    const opponentTagFromPayload = normalizeClanTag(String(opponent.tag ?? ""));
+    if (clanTagFromPayload !== requested && opponentTagFromPayload !== requested) return;
+    const endTime = String(raw.endTime ?? "").trim();
+    if (!endTime) return;
+    const oriented = clanTagFromPayload === requested
+      ? raw
+      : { ...raw, clan: opponent, opponent: clan };
+    const otherTag = normalizeClanTag(String((oriented.opponent as ClashRecord)?.tag ?? ""));
+    const key = `${requested}__${otherTag}__${endTime}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    await snapshotCurrentWar(clanTag, { ...oriented, state: "warEnded" }, log as any);
+  };
+
+  try {
+    const bulk = await fetchOptionalClashKingResource(
+      `/war/${encodeURIComponent(requested)}/previous`,
+      null,
+      log,
+    );
+    for (const war of listItems(bulk.data).slice(0, maxWars)) {
+      try { await save(war); } catch (error) { log.warn({ error }, "ClashIQ historical bulk war save failed"); }
+    }
+  } catch (error) {
+    log.warn({ error }, "ClashIQ historical bulk recovery failed");
+  }
+
+  try {
+    const warlog = await fetchOptionalResource(
+      `/clans/${encodeURIComponent(requested)}/warlog`,
+      [],
+      log,
+    );
+    for (const listed of listItems(warlog.data).slice(0, maxWars)) {
+      const endTime = String(listed.endTime ?? "").trim();
+      if (!endTime) continue;
+      const clan = listed.clan && typeof listed.clan === "object" ? listed.clan as ClashRecord : null;
+      const opponent = listed.opponent && typeof listed.opponent === "object" ? listed.opponent as ClashRecord : null;
+      if (!clan || !opponent) continue;
+      const otherTag = normalizeClanTag(String(opponent.tag ?? ""));
+      const key = `${requested}__${otherTag}__${endTime}`;
+      if (seen.has(key)) continue;
+      try {
+        const detail = await fetchOptionalClashKingResource(
+          `/war/${encodeURIComponent(requested)}/previous/${encodeURIComponent(endTime)}`,
+          null,
+          log,
+        );
+        for (const war of listItems(detail.data).slice(0, 1)) await save(war);
+      } catch (error) {
+        log.warn({ error, endTime }, "ClashIQ historical war detail recovery failed");
+      }
+    }
+  } catch (error) {
+    log.warn({ error }, "ClashIQ historical warlog discovery failed");
+  }
+}
+\nconst router: IRouter = Router();
 
 const DEFAULT_CLAN_TAG = "#2Q0Q82C9R";
 const CLASH_API_BASE_URL =
@@ -1023,6 +1102,44 @@ router.get(
 
       const clanTag =
         await getActiveClanTag();
+
+      // Player history is database-first. Warm the persistent archive before
+      // reading it so a fresh Render instance does not return Historical Wars 0.
+      await recoverHistoricalWars(clanTag, req.log, 15);
+
+      const archivedHistory = await getPlayerWarHistory(clanTag, tag, 50);
+      if (archivedHistory.length > 0) {
+        const allAttacks = archivedHistory.flatMap((war) => war.attacks);
+        const totalAttacks = allAttacks.length;
+        const totalStars = allAttacks.reduce((sum, attack) => sum + Number(attack.stars ?? 0), 0);
+        const totalDestruction = allAttacks.reduce((sum, attack) => sum + Number(attack.destructionPercentage ?? 0), 0);
+        const threeStarAttacks = allAttacks.filter((attack) => Number(attack.stars ?? 0) >= 3).length;
+        const oneStarOrLess = allAttacks.filter((attack) => Number(attack.stars ?? 0) <= 1).length;
+        const maxDestruction = allAttacks.reduce((max, attack) => Math.max(max, Number(attack.destructionPercentage ?? 0)), 0);
+        const missedWars = archivedHistory.filter((war) => war.attacks.length === 0).length;
+
+        res.json({
+          ...player,
+          historicalWarStats: {
+            wars: archivedHistory.length,
+            totalAttacks,
+            totalStars,
+            averageStarsPerAttack: totalAttacks ? totalStars / totalAttacks : 0,
+            averageDestruction: totalAttacks ? totalDestruction / totalAttacks : 0,
+            maxDestruction,
+            threeStarAttacks,
+            oneStarOrLess,
+            missedWars,
+            recentWars: archivedHistory.slice(0, 20).map((war) => ({
+              endTime: war.endTime,
+              result: war.won === "win" ? "won" : war.won === "lose" ? "lost" : war.won === "tie" ? "draw" : null,
+              opponentName: war.opponentName,
+              attacks: war.attacks,
+            })),
+          },
+        });
+        return;
+      }
 
       const warlog =
         await fetchOptionalResource(
