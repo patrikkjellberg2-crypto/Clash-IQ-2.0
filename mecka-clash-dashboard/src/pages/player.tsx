@@ -1033,7 +1033,7 @@ export default function PlayerPage() {
                       icon={Swords}
                       label="Historical Wars"
                       value={num(historical.wars)}
-                      sub="From clan war log"
+                      sub="From Persistent War Archive"
                     />
 
                     <Stat
