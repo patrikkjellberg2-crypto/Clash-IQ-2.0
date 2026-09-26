@@ -811,7 +811,7 @@ export default function PlayerPage() {
                   value={num(
                     historical.wars,
                   )}
-                  sub="From clan war log"
+                  sub="From Persistent War Archive"
                 />
 
                 <Stat
