@@ -18,6 +18,7 @@ import {
   getArchivedWar,
   listArchivedWars,
   listPlayerWarStats,
+  listPlayerPerformance,
   snapshotCurrentWar,
   snapshotWarlog,
 } from "../lib/war-archive";
@@ -949,6 +950,19 @@ router.get("/clash/war-archive", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Failed to load war archive");
     res.status(503).json({ error: "Could not load the war archive.", code: "WAR_ARCHIVE_FAILED" });
+  }
+});
+
+router.get("/clash/war-intelligence", async (req, res): Promise<void> => {
+  try {
+    const clanTag = await getActiveClanTag(
+      typeof req.query.clanTag === "string" ? req.query.clanTag : undefined,
+    );
+    const players = await listPlayerPerformance(clanTag);
+    res.json({ clanTag, players });
+  } catch (error) {
+    req.log.error({ err: error }, "Failed to load war intelligence");
+    res.status(503).json({ error: "Could not load war intelligence.", code: "WAR_INTELLIGENCE_FAILED" });
   }
 });
 

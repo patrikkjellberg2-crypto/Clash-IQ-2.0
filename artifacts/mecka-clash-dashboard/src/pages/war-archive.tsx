@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
-import { ArrowLeft, RefreshCw, Trophy, WifiOff } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Trophy, WifiOff, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { AppSidebar } from '@/components/app-sidebar';
 import { ClashIQInlineBanner } from '@/components/clashiq-inline-banner';
 import {
@@ -46,6 +46,26 @@ type ServerWar = {
   members: Member[];
   opponentMembers: Member[];
   source: 'live' | 'warlog';
+};
+
+type PlayerPerformance = {
+  playerTag: string;
+  playerName: string;
+  warsCounted: number;
+  attacksPossible: number;
+  attacksUsed: number;
+  missedAttacks: number;
+  starsTotal: number;
+  threeStars: number;
+  avgStars: number;
+  avgDestruction: number;
+  threeStarRate: number;
+  recentWars: number;
+  recentAvgStars: number;
+  previousAvgStars: number;
+  recentAvgDestruction: number;
+  previousAvgDestruction: number;
+  trend: 'improving' | 'declining' | 'stable';
 };
 
 type PlayerStat = {
@@ -236,17 +256,23 @@ function WarCard({ war }: { war: ServerWar }) {
 export default function WarArchivePage() {
   const [wars, setWars] = useState<ServerWar[]>([]);
   const [players, setPlayers] = useState<PlayerStat[]>([]);
+  const [performance, setPerformance] = useState<PlayerPerformance[]>([]);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/clash/war-archive');
-      if (!res.ok) throw new Error(String(res.status));
-      const data = await res.json();
+      const [archiveRes, intelligenceRes] = await Promise.all([
+        fetch('/api/clash/war-archive'),
+        fetch('/api/clash/war-intelligence'),
+      ]);
+      if (!archiveRes.ok) throw new Error(String(archiveRes.status));
+      const data = await archiveRes.json();
+      const intelligence = intelligenceRes.ok ? await intelligenceRes.json() : { players: [] };
       setWars(Array.isArray(data.wars) ? data.wars : []);
       setPlayers(Array.isArray(data.players) ? data.players : []);
+      setPerformance(Array.isArray(intelligence.players) ? intelligence.players : []);
       setOffline(false);
     } catch {
       // Server archive unavailable: fall back to whatever this device saved
@@ -397,6 +423,82 @@ export default function WarArchivePage() {
                           <td className="py-2">{p.threeStars}</td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+
+            {performance.length > 0 && (
+              <section className="rounded-2xl border border-amber-400/15 bg-[#0d131b]/95 p-5 shadow-[0_18px_55px_rgba(0,0,0,.16)]">
+                <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/[.06] pb-4">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">War Intelligence 2.0</p>
+                    <h2 className="mt-1 text-xl font-black">Player Performance</h2>
+                    <p className="mt-1 max-w-2xl text-xs text-slate-500">
+                      Recent performance is compared with the previous five completed wars. Trend data comes from archived live attack data.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-white/[.08] bg-white/[.02] px-3 py-1 text-[9px] font-black uppercase tracking-[.16em] text-slate-500">
+                    {performance.length} tracked players
+                  </span>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {(['improving', 'stable', 'declining'] as const).map(trend => {
+                    const count = performance.filter(p => p.trend === trend).length;
+                    const Icon = trend === 'improving' ? TrendingUp : trend === 'declining' ? TrendingDown : Minus;
+                    const tone = trend === 'improving' ? 'text-emerald-300' : trend === 'declining' ? 'text-red-300' : 'text-slate-300';
+                    return (
+                      <div key={trend} className="rounded-xl border border-white/[.06] bg-white/[.02] p-3">
+                        <div className="flex items-center gap-2">
+                          <Icon className={`size-4 ${tone}`} />
+                          <span className={`text-[9px] font-black uppercase tracking-[.18em] ${tone}`}>{trend}</span>
+                        </div>
+                        <p className="mt-2 text-2xl font-black">{count}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-left text-sm">
+                    <thead className="text-[9px] uppercase tracking-[.16em] text-slate-500">
+                      <tr>
+                        <th className="py-2 pr-3">Player</th>
+                        <th className="py-2 pr-3">Trend</th>
+                        <th className="py-2 pr-3">Recent ★</th>
+                        <th className="py-2 pr-3">Destruction</th>
+                        <th className="py-2 pr-3">3★ Rate</th>
+                        <th className="py-2 pr-3">Missed</th>
+                        <th className="py-2">Wars</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {performance.map(p => {
+                        const Icon = p.trend === 'improving' ? TrendingUp : p.trend === 'declining' ? TrendingDown : Minus;
+                        const tone = p.trend === 'improving' ? 'text-emerald-300' : p.trend === 'declining' ? 'text-red-300' : 'text-slate-400';
+                        const delta = p.previousAvgStars ? p.recentAvgStars - p.previousAvgStars : 0;
+                        return (
+                          <tr key={p.playerTag} className="border-t border-white/5">
+                            <td className="py-3 pr-3">
+                              <p className="font-bold">{p.playerName}</p>
+                              <p className="font-mono text-[9px] text-slate-600">{p.playerTag}</p>
+                            </td>
+                            <td className="py-3 pr-3">
+                              <span className={`inline-flex items-center gap-1 rounded-full border border-white/[.08] bg-white/[.03] px-2 py-1 text-[9px] font-black uppercase ${tone}`}>
+                                <Icon className="size-3" /> {p.trend}
+                              </span>
+                              {p.previousAvgStars > 0 && <span className="ml-2 text-[10px] text-slate-500">{delta >= 0 ? '+' : ''}{delta.toFixed(2)}★</span>}
+                            </td>
+                            <td className="py-3 pr-3 font-black">{p.recentAvgStars.toFixed(2)}</td>
+                            <td className="py-3 pr-3">{p.recentAvgDestruction.toFixed(1)}%</td>
+                            <td className="py-3 pr-3">{p.threeStarRate.toFixed(0)}%</td>
+                            <td className={`py-3 pr-3 ${p.missedAttacks ? 'text-red-300' : 'text-emerald-300'}`}>{p.missedAttacks}</td>
+                            <td className="py-3">{p.warsCounted}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
