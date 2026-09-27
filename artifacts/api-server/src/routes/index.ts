@@ -3,11 +3,13 @@ import healthRouter from "./health";
 import clashRouter from "./clash";
 import warPlannerRouter from "./war-planner";
 import aiCoachRouter from "./ai-coach";
+import clanMusicRouter from "./clan-music";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(clashRouter);
+router.use(clanMusicRouter);
 
 /*
  * War Planner ska registreras före ai-coach.
